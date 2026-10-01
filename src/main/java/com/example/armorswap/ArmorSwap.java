@@ -55,3 +55,70 @@ public class ArmorSwap {
             active = true; nextPiece = 0; cooldown = 0; changed = 0;   // start one operation
         }
         wasDown = down;
+
+        if (!active) return;
+        if (mc.currentScreen != null) { active = false; msg(p, "Cancelled."); return; }
+
+        if (cooldown > 0) { cooldown--; return; }
+
+        // Advance to the next piece that actually needs changing (skips are instant).
+        while (nextPiece < 4) {
+            boolean swapped = processPiece(mc, p, nextPiece);
+            nextPiece++;
+            if (swapped) {
+                changed++;
+                if (nextPiece < 4) cooldown = TICKS_BETWEEN_PIECES;
+                break;
+            }
+        }
+
+        if (nextPiece >= 4 && cooldown == 0) {
+            active = false;
+            msg(p, changed == 0 ? "Armor already optimal." : "Swapped " + changed + " piece(s).");
+        }
+    }
+
+    /** Handles one armor slot. Returns true if clicks were sent. */
+    private boolean processPiece(Minecraft mc, EntityPlayerSP p, int t) {
+        Container c = p.inventoryContainer;
+        int armorSlot = FIRST_ARMOR_CONTAINER_SLOT + t;
+
+        ItemStack worn = c.getSlot(armorSlot).getStack();
+        int bestSlot = armorSlot;
+        int bestDur = (worn != null && usable(worn)) ? remaining(worn) : -1;
+
+        for (int i = FIRST_ARMOR_CONTAINER_SLOT + 4; i <= LAST_CONTAINER_SLOT; i++) {
+            ItemStack s = c.getSlot(i).getStack();
+            if (s == null || !s.getItem().isValidArmor(s, t, p)) continue;
+            if (!usable(s)) continue;
+            int d = remaining(s);
+            if (d > bestDur) { bestDur = d; bestSlot = i; }
+        }
+
+        if (bestSlot == armorSlot) return false;
+
+        click(mc, c, bestSlot);
+        click(mc, c, armorSlot);
+        click(mc, c, bestSlot);
+        return true;
+    }
+
+    private boolean usable(ItemStack s) {
+        int max = s.getMaxDamage();
+        if (max <= 0) return true;
+        return (double) (max - s.getItemDamage()) / max >= MIN_DURABILITY_FRACTION;
+    }
+
+    private int remaining(ItemStack s) {
+        int max = s.getMaxDamage();
+        return max <= 0 ? Integer.MAX_VALUE : max - s.getItemDamage();
+    }
+
+    private void click(Minecraft mc, Container c, int slot) {
+        mc.playerController.windowClick(c.windowId, slot, 0, 0, mc.thePlayer);
+    }
+
+    private void msg(EntityPlayerSP p, String text) {
+        p.addChatMessage(new ChatComponentText("\u00a77[ArmorSwap] " + text));
+    }
+}
