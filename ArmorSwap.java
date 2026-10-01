@@ -2,6 +2,7 @@ package com.example.armorswap;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.gui.inventory.GuiInventory;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.inventory.Container;
 import net.minecraft.item.ItemStack;
@@ -15,15 +16,18 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
 import org.lwjgl.input.Keyboard;
 
-@Mod(modid = "armorswap", name = "Armor Swap", version = "2.1",
+@Mod(modid = "armorswap", name = "Armor Swap", version = "2.2",
         clientSideOnly = true, acceptedMinecraftVersions = "[1.8.9]")
 public class ArmorSwap {
 
     /** Pieces with less than this fraction of durability left are never worn. */
     private static final double MIN_DURABILITY_FRACTION = 0.30;
 
-    /** Ticks to wait between pieces (1 tick = 50 ms). 3 -> ~0.45 s for a full swap. */
-    private static final int TICKS_BETWEEN_PIECES = 3;
+    /** Ticks to wait between pieces (20 ticks = 1 second). 10 = 0.5 s. */
+    private static final int TICKS_BETWEEN_PIECES = 10;
+
+    /** Ticks to wait after the inventory opens before the first click. 6 = 0.3 s. */
+    private static final int OPEN_DELAY_TICKS = 6;
 
     private static final int FIRST_ARMOR_CONTAINER_SLOT = 5;
     private static final int LAST_CONTAINER_SLOT = 44;
@@ -51,30 +55,47 @@ public class ArmorSwap {
         if (p == null || mc.playerController == null) { active = false; return; }
 
         boolean down = key.getKeyCode() > 0 && Keyboard.isKeyDown(key.getKeyCode());
-        if (down && !wasDown && !active && mc.currentScreen == null) {
-            active = true; nextPiece = 0; cooldown = 0; changed = 0;   // start one operation
-        }
+        boolean pressed = down && !wasDown;
         wasDown = down;
 
-        if (!active) return;
-        if (mc.currentScreen != null) { active = false; msg(p, "Cancelled."); return; }
+        if (!active) {
+            // One press = one operation. Open the inventory like pressing E.
+            if (pressed && mc.currentScreen == null) {
+                mc.displayGuiScreen(new GuiInventory(p));
+                active = true;
+                nextPiece = 0;
+                changed = 0;
+                cooldown = OPEN_DELAY_TICKS;
+            }
+            return;
+        }
+
+        // Player pressed Esc/E or something else took over the screen: stop.
+        if (!(mc.currentScreen instanceof GuiInventory)) {
+            active = false;
+            msg(p, "Cancelled.");
+            return;
+        }
 
         if (cooldown > 0) { cooldown--; return; }
 
-        // Advance to the next piece that actually needs changing (skips are instant).
+        // All pieces handled and the last wait is over: close and finish.
+        if (nextPiece >= 4) {
+            active = false;
+            p.closeScreen();
+            msg(p, changed == 0 ? "Armor already optimal." : "Swapped " + changed + " piece(s).");
+            return;
+        }
+
+        // Find the next piece that needs changing (pieces already best are skipped).
         while (nextPiece < 4) {
             boolean swapped = processPiece(mc, p, nextPiece);
             nextPiece++;
             if (swapped) {
                 changed++;
-                if (nextPiece < 4) cooldown = TICKS_BETWEEN_PIECES;
+                cooldown = TICKS_BETWEEN_PIECES;
                 break;
             }
-        }
-
-        if (nextPiece >= 4 && cooldown == 0) {
-            active = false;
-            msg(p, changed == 0 ? "Armor already optimal." : "Swapped " + changed + " piece(s).");
         }
     }
 
